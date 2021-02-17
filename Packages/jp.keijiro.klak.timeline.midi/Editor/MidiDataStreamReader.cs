@@ -1,3 +1,5 @@
+using UnityEngine;
+
 namespace Klak.Timeline.Midi
 {
     // MIDI binary data stream reader
@@ -78,6 +80,30 @@ namespace Klak.Timeline.Midi
                 v <<= 7;
             }
             return v;
+        }
+
+        public uint ReadMultiByteValue2()
+        {
+            var v = 0u;
+            while (true)
+            {
+                uint b = ReadByte();
+                v += b & 0x7fu; // 127
+                if (b < 0x80u) // 128
+                {
+                    break;
+                }
+                v <<= 7;
+            }
+            return v;
+        }
+
+        public uint ReadBEUInt24()  
+        { 
+            uint b1 = ReadByte(); 
+            uint b2 = ReadByte(); 
+            uint b3 = ReadByte(); 
+            return b3 + (b2 << 8) + (b1 << 16); 
         }
 
         #endregion

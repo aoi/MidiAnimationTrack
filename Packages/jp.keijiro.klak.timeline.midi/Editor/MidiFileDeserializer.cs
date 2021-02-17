@@ -59,13 +59,22 @@ namespace Klak.Timeline.Midi
 
             // MIDI event sequence
             var events = new List<MidiEvent>();
-            var ticks = 0u;
+            var tick = 0u;
+            var time = 0f;
+            var tempo = 120f;
             var stat = (byte)0;
+            var ticksStr = "";
+            var noteOnCnt = 0;
 
             while (reader.Position < chunkEnd)
             {
                 // Delta time
-                ticks += reader.ReadMultiByteValue();
+                var delta = reader.ReadMultiByteValue2();
+                tick += delta;
+                // Time with tempo
+                var secondsPerBeat = 60f / tempo;
+                var deltaSeconds = secondsPerBeat * ((float)delta / (float)tpqn);
+                time += deltaSeconds;
 
                 // Status byte
                 if ((reader.PeekByte() & 0x80u) != 0)
@@ -73,14 +82,43 @@ namespace Klak.Timeline.Midi
                 
                 if (stat == 0xffu)
                 {
-                    // 0xff: Meta event (unused)
-                    reader.Advance(1);
-                    reader.Advance(reader.ReadMultiByteValue());
+                    // 0xff: Meta event
+                    var meta = reader.ReadByte();
+
+                    if (meta == 0x51u) { // tempo set
+                        var dataLength = reader.ReadMultiByteValue();
+                        var data = reader.ReadBEUInt24();
+                        var tmp = Math.Round(60000000 / (float)data);
+                        events.Add(new MidiEvent {
+                            time = time,
+                            tick = tick,
+                            status = stat,
+                            data1 = meta,
+                            data2 = (byte)tmp
+                        });
+                        tempo = (float)tmp;
+                    } else {
+                        reader.Advance(reader.ReadMultiByteValue());
+                        events.Add(new MidiEvent {
+                            time = time,
+                            tick = tick,
+                            status = stat,
+                            data1 = meta,
+                            data2 = new byte() // dummy
+                        });
+                    }
                 }
                 else if (stat == 0xf0u)
                 {
                     // 0xf0: SysEx (unused)
                     while (reader.ReadByte() != 0xf7u) {}
+                    events.Add(new MidiEvent {
+                            time = time,
+                            tick = tick,
+                            status = stat,
+                            data1 = new byte(), // dummy
+                            data2 = new byte() // dummy
+                        });
                 }
                 else
                 {
@@ -88,13 +126,21 @@ namespace Klak.Timeline.Midi
                     var b1 = reader.ReadByte();
                     var b2 = (stat & 0xe0u) == 0xc0u ? (byte)0 : reader.ReadByte();
                     events.Add(new MidiEvent {
-                        time = ticks, status = stat, data1 = b1, data2 = b2
+                        time = time, tick = tick, status = stat, data1 = b1, data2 = b2
                     });
+                    if ((stat & 0xf0) == 0x90) {
+                        // Debug.LogFormat("tick: {0}, time: {1}", (float)tick, time);
+                        ticksStr += tick + "\n";
+
+                        noteOnCnt++;
+                    }
                 }
             }
+            // Debug.Log(ticksStr);
+            Debug.LogFormat("Note On {0}", noteOnCnt);
 
             // Quantize duration with bars.
-            var bars = (ticks + tpqn * 4 - 1) / (tpqn * 4);
+            var bars = (tick + tpqn * 4 - 1) / (tpqn * 4);
 
             // Asset instantiation
             var asset = ScriptableObject.CreateInstance<MidiAnimationAsset>();

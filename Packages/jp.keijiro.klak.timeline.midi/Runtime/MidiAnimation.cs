@@ -14,6 +14,11 @@ namespace Klak.Timeline.Midi
         public uint ticksPerQuarterNote = 96;
         public MidiEvent [] events;
 
+
+        float timeCache = 0f;
+        int idx = 0;
+        uint previousTick = 0;
+
         #endregion
 
         #region Public properties and methods
@@ -43,6 +48,11 @@ namespace Klak.Timeline.Midi
         public override void OnGraphStart(Playable playable)
         {
             _previousTime = (float)playable.GetTime();
+
+            timeCache = 0f;
+            idx = 0;
+            previousTick = 0;
+
         }
 
         public override void OnBehaviourPause(Playable playable, FrameData info)
@@ -51,18 +61,21 @@ namespace Klak.Timeline.Midi
             // of the clip should be all triggered.
             if (!playable.IsDone()) return;
             var duration = (float)playable.GetDuration();
-            TriggerSignals(playable, info.output, _previousTime, duration);
+            var t = ConvertSecondToTicks(duration);
+            TriggerSignals(playable, info.output, previousTick, t);
         }
 
         public override void PrepareFrame(Playable playable, FrameData info)
         {
             var current = (float)playable.GetTime();
 
+            var currentTick = ConvertSecondToTicksWithCache(current);
+
             // Playback or scrubbing?
             if (info.evaluationType == FrameData.EvaluationType.Playback)
             {
                 // Trigger signals between the prrevious/current time.
-                TriggerSignals(playable, info.output, _previousTime, current);
+                TriggerSignals(playable, info.output, previousTick, currentTick);
             }
             else
             {
@@ -74,18 +87,20 @@ namespace Klak.Timeline.Midi
                 if (current - _previousTime < maxDiff)
                 {
                     // Trigger the signals as usual.
-                    TriggerSignals(playable, info.output, _previousTime, current);
+                    TriggerSignals(playable, info.output, previousTick, currentTick);
                 }
                 else
                 {
                     // It's jumping not scrubbed, so trigger signals laying
                     // around the current frame.
                     var t0 = Mathf.Max(0, current - maxDiff);
-                    TriggerSignals(playable, info.output, t0, current);
+                    var t = ConvertSecondToTicks(t0);
+                    TriggerSignals(playable, info.output, t, currentTick);
                 }
             }
 
             _previousTime = current;
+            previousTick = currentTick;
         }
 
         #endregion
@@ -95,12 +110,15 @@ namespace Klak.Timeline.Midi
         MidiSignalPool _signalPool = new MidiSignalPool();
 
         void TriggerSignals
-            (Playable playable, PlayableOutput output, float previous, float current)
+            (Playable playable, PlayableOutput output, uint previous, uint current)
         {
             _signalPool.ResetFrame();
 
-            var t0 = ConvertSecondToTicks(previous);
-            var t1 = ConvertSecondToTicks(current);
+            // var t0 = ConvertSecondToTicksWithCache(previous);
+            // var t0 = previousTick;
+            // var t1 = ConvertSecondToTicksWithCache(current);
+            var t0 = previous;
+            var t1 = current;
 
             // Resolve wrapping-around cases by offsetting.
             if (t1 < t0) t1 += (t0 / duration + 1) * duration;
@@ -120,6 +138,8 @@ namespace Klak.Timeline.Midi
 
             // Trigger signals between t0 and t1.
             TriggerSignalsTick(playable, output, t0, t1);
+
+            previousTick = t1;
         }
 
         void TriggerSignalsTick
@@ -127,8 +147,13 @@ namespace Klak.Timeline.Midi
         {
             foreach (var e in events)
             {
-                if (e.time >= current) break;
-                if (e.time < previous) continue;
+                if (e.tick >= current) break;
+                if (e.tick < previous) continue;
+                
+                if (e.IsTempoSet) {
+                    tempo = e.data2;
+                    continue;
+                }
                 if (!e.IsNote) continue;
                 output.PushNotification(playable, _signalPool.Allocate(e));
             }
@@ -145,7 +170,7 @@ namespace Klak.Timeline.Midi
             {
                 ref var e = ref events[i];
                 if (!e.IsCC || e.data1 != ccNumber) continue;
-                if (e.time > tick) return (last, i);
+                if (e.tick > tick) return (last, i);
                 last = i;
             }
             return (last, last);
@@ -158,7 +183,7 @@ namespace Klak.Timeline.Midi
             for (var i = 0; i < events.Length; i++)
             {
                 ref var e = ref events[i];
-                if (e.time > tick) break;
+                if (e.tick > tick) break;
                 if (!note.Check(e)) continue;
                 if (e.IsNoteOn) iOn = i; else iOff = i;
             }
@@ -167,7 +192,39 @@ namespace Klak.Timeline.Midi
 
         uint ConvertSecondToTicks(float time)
         {
-            return (uint)(time * tempo / 60 * ticksPerQuarterNote);
+            // return (uint)(time * tempo / 60 * ticksPerQuarterNote);
+
+            uint tick = 0;
+            for (var i = 0; i < events.Length; i++) {
+
+                if (time <= events[i].time) {
+                    break;
+                }
+
+                tick = events[i].tick;
+            }
+
+            return tick;
+        }
+
+        uint ConvertSecondToTicksWithCache(float time)
+        {
+            // return (uint)(time * tempo / 60 * ticksPerQuarterNote);
+            var iTmp = 0;
+            if (timeCache <= time) {
+                iTmp = idx;
+            }
+            uint tick = 0;
+            for (var i = iTmp; i < events.Length; i++) {
+
+                if (time <= events[i].time) {
+                    break;
+                }
+
+                tick = events[i].tick;
+            }
+
+            return tick;
         }
 
         float ConvertTicksToSecond(uint tick)
@@ -218,11 +275,11 @@ namespace Klak.Timeline.Midi
             ref var eOn = ref events[pair.iOn]; // Note-on event
 
             // Note-on time
-            var onTime = ConvertTicksToSecond(eOn.time);
+            var onTime = ConvertTicksToSecond(eOn.tick);
 
             // Note-off time
             var offTime = pair.iOff < 0 || pair.iOff < pair.iOn ?
-                time : ConvertTicksToSecond(events[pair.iOff].time);
+                time : ConvertTicksToSecond(events[pair.iOff].tick);
 
             var envelope = CalculateEnvelope(
                 control.envelope,
@@ -244,7 +301,7 @@ namespace Klak.Timeline.Midi
             ref var eOn = ref events[pair.iOn]; // Note-on event
 
             // Note-on time
-            var onTime = ConvertTicksToSecond(eOn.time);
+            var onTime = ConvertTicksToSecond(eOn.tick);
 
             var curve = control.curve.Evaluate(Mathf.Max(0, time - onTime));
             var velocity = eOn.data2 / 127.0f;
@@ -263,8 +320,8 @@ namespace Klak.Timeline.Midi
             ref var e0 = ref events[pair.i0];
             ref var e1 = ref events[pair.i1];
 
-            var t0 = ConvertTicksToSecond(e0.time);
-            var t1 = ConvertTicksToSecond(e1.time);
+            var t0 = ConvertTicksToSecond(e0.tick);
+            var t1 = ConvertTicksToSecond(e1.tick);
 
             var v0 = e0.data2 / 127.0f;
             var v1 = e1.data2 / 127.0f;
