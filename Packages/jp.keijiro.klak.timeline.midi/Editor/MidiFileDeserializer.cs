@@ -64,7 +64,7 @@ namespace Klak.Timeline.Midi
             var tempo = 120f;
             var stat = (byte)0;
             var ticksStr = "";
-            var noteOnCnt = 0;
+            var hitPointsCnt = 0;
 
             while (reader.Position < chunkEnd)
             {
@@ -89,6 +89,7 @@ namespace Klak.Timeline.Midi
                         var dataLength = reader.ReadMultiByteValue();
                         var data = reader.ReadBEUInt24();
                         var tmp = Math.Round(60000000 / (float)data);
+                        Debug.LogFormat("tick: {0}, tempo: {1}", tick, tmp);
                         events.Add(new MidiEvent {
                             time = time,
                             tick = tick,
@@ -96,6 +97,7 @@ namespace Klak.Timeline.Midi
                             data1 = meta,
                             data2 = (byte)tmp
                         });
+
                         tempo = (float)tmp;
                     } else {
                         reader.Advance(reader.ReadMultiByteValue());
@@ -106,6 +108,7 @@ namespace Klak.Timeline.Midi
                             data1 = meta,
                             data2 = new byte() // dummy
                         });
+                        
                     }
                 }
                 else if (stat == 0xf0u)
@@ -113,31 +116,38 @@ namespace Klak.Timeline.Midi
                     // 0xf0: SysEx (unused)
                     while (reader.ReadByte() != 0xf7u) {}
                     events.Add(new MidiEvent {
-                            time = time,
-                            tick = tick,
-                            status = stat,
-                            data1 = new byte(), // dummy
-                            data2 = new byte() // dummy
-                        });
+                        time = time,
+                        tick = tick,
+                        status = stat,
+                        data1 = new byte(), // dummy
+                        data2 = new byte() // dummy
+                    });
+
                 }
                 else
                 {
                     // MIDI event
                     var b1 = reader.ReadByte();
                     var b2 = (stat & 0xe0u) == 0xc0u ? (byte)0 : reader.ReadByte();
-                    events.Add(new MidiEvent {
-                        time = time, tick = tick, status = stat, data1 = b1, data2 = b2
-                    });
-                    if ((stat & 0xf0) == 0x90) {
-                        // Debug.LogFormat("tick: {0}, time: {1}", (float)tick, time);
-                        ticksStr += tick + "\n";
+                    if (!Contains(events, tick, stat)) {
+                        events.Add(new MidiEvent {
+                            time = time, tick = tick, status = stat, data1 = b1, data2 = b2
+                        });
 
-                        noteOnCnt++;
+                        if ((stat & 0xf0) == 0x90) {
+                            Debug.LogFormat("tick: {0}, time: {1}, frame: {2}, note: {3}", (float)tick, time, Math.Round(time * 60), b1);
+                            ticksStr += tick + "\n";
+
+                            if (b1 == 0x26 || b1 == 0x23) {
+                                hitPointsCnt++;
+                            }
+
+                        }
                     }
                 }
             }
             // Debug.Log(ticksStr);
-            Debug.LogFormat("Note On {0}", noteOnCnt);
+            Debug.LogFormat("HitPoints {0}", hitPointsCnt);
 
             // Quantize duration with bars.
             var bars = (tick + tpqn * 4 - 1) / (tpqn * 4);
@@ -149,6 +159,20 @@ namespace Klak.Timeline.Midi
             asset.template.ticksPerQuarterNote = tpqn;
             asset.template.events = events.ToArray();
             return asset;
+        }
+
+        static bool Contains(List<MidiEvent> events, float tick, byte status)
+        {
+            bool contains = false;
+            foreach (var e in events) {
+                if (e.tick == tick && e.status == status)
+                {
+                    contains = true;
+                    break;
+                }
+            }
+
+            return contains;
         }
 
         #endregion
