@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using UnityEngine.Playables;
 
@@ -69,7 +70,8 @@ namespace Klak.Timeline.Midi
         {
             var current = (float)playable.GetTime();
 
-            var currentTick = ConvertSecondToTicksWithCache(current);
+            // var currentTick = ConvertSecondToTicksWithCache(current);
+            var currentTick = ConvertSecondToTicks(current);
 
             // Playback or scrubbing?
             if (info.evaluationType == FrameData.EvaluationType.Playback)
@@ -194,16 +196,26 @@ namespace Klak.Timeline.Midi
         {
             // return (uint)(time * tempo / 60 * ticksPerQuarterNote);
 
+            float te = 0f; // tempo
             uint tick = 0;
-            for (var i = 0; i < events.Length; i++) {
+            float timeLastTempoSet = 0f;
+            float timeSinceTempoSet = 0f;
 
-                if (time <= events[i].time) {
-                    break;
+            // timeまでのTempo Set時のtickを取得
+            foreach(var e in events) {
+                if (time <= e.time) { break; }
+
+                if (e.IsTempoSet) {
+                    te = e.tempo;
+                    timeLastTempoSet = e.time;
+                    tick = e.tick;
                 }
-
-                tick = events[i].tick;
             }
 
+            // 最後のTempo Set時からtimeまでのtick数を計算
+            timeSinceTempoSet = time - timeLastTempoSet;
+            tick += (uint)(timeSinceTempoSet * te / 60f * ticksPerQuarterNote);
+            // Debug.LogFormat("{0}, {1}, {2}, {3}", time, tick, timeSinceTempoSet, te);
             return tick;
         }
 

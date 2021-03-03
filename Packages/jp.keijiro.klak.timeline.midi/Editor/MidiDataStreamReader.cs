@@ -82,22 +82,6 @@ namespace Klak.Timeline.Midi
             return v;
         }
 
-        public uint ReadMultiByteValue2()
-        {
-            var v = 0u;
-            while (true)
-            {
-                uint b = ReadByte();
-                v += b & 0x7fu; // 127
-                if (b < 0x80u) // 128
-                {
-                    break;
-                }
-                v <<= 7;
-            }
-            return v;
-        }
-
         public uint ReadBEUInt24()  
         { 
             uint b1 = ReadByte(); 

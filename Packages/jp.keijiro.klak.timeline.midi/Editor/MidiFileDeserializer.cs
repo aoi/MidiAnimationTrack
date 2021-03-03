@@ -69,7 +69,7 @@ namespace Klak.Timeline.Midi
             while (reader.Position < chunkEnd)
             {
                 // Delta time
-                var delta = reader.ReadMultiByteValue2();
+                var delta = reader.ReadMultiByteValue();
                 tick += delta;
                 // Time with tempo
                 var secondsPerBeat = 60f / tempo;
@@ -90,15 +90,16 @@ namespace Klak.Timeline.Midi
                         var data = reader.ReadBEUInt24();
                         var tmp = Math.Round(60000000 / (float)data);
                         Debug.LogFormat("tick: {0}, tempo: {1}", tick, tmp);
+                        tempo = (float)tmp;
                         events.Add(new MidiEvent {
                             time = time,
                             tick = tick,
                             status = stat,
                             data1 = meta,
-                            data2 = (byte)tmp
+                            data2 = new byte(), // dummy
+                            tempo = tempo
                         });
 
-                        tempo = (float)tmp;
                     } else {
                         reader.Advance(reader.ReadMultiByteValue());
                         events.Add(new MidiEvent {

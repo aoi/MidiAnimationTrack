@@ -10,6 +10,8 @@ namespace Klak.Timeline.Midi
         public byte data1;
         public byte data2;
 
+        public float tempo;
+
         public bool IsCC      { get { return (status & 0xb0) == 0xb0; } }
         public bool IsNote    { get { return (status & 0xe0) == 0x80; } }
         public bool IsNoteOn  { get { return (status & 0xf0) == 0x90; } }
